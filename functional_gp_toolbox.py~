@@ -15,7 +15,7 @@ class covariance_functions(object):
         #
         def __init__(self, length_scale):
             self.function = []
-            self.fourier = []
+            self.fourier = lambda xi: fourier_exception()
         #
         def fourier_exception():
             raise NotImplementedError, "The fourier transform of this kernel has not been implemented jet!"
@@ -40,19 +40,17 @@ class covariance_functions(object):
         #
         def __init__(self, frequency):
             self.function = lambda x,y,f=2*np.pi*frequency: np.cos(f*(x - y))
-            self.fourier = lambda xi: fourier_exception()
 
     class polynomial(generic_covariance):
         #
         def __init__(self, order):
             self.function = lambda x,y,p = order: (x*y + 1)**p
-            self.fourier = lambda xi: fourier_exception()
 
     class periodic(generic_covariance):
         #
         def __init__(self, frequency, harmonicity):
             self.function = lambda x,y,f = frequency, rho = harmonicity: np.exp(-2*np.sin(np.pi*f*(x - y))**2/rho**2) 
-            self.fourier = lambda xi: fourier_exception()
+
 
 #
 
