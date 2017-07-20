@@ -9,52 +9,7 @@ import sys
 sys.setrecursionlimit(1000)
 get_ipython().magic(u'matplotlib inline')
 
-class covariance_functions(object):
-    
-    class generic_covariance(object):
-        #
-        def __init__(self, length_scale):
-            self.function = []
-            self.fourier = []
-        #
-        def fourier_exception():
-            raise NotImplementedError, "The fourier transform of this kernel has not been implemented jet!"
-        #
-        def __call__(self, x, y):
-            return self.function(x, y)
-    
-    class squared_exponential(generic_covariance):
-        #
-        def __init__(self, length_scale):
-            self.function = lambda x,y,s=length_scale: np.exp(-(x - y)**2/(2*s**2))
-            self.fourier = lambda xi,s=length_scale: s*np.exp(-s**2*xi**2/(2))
 
-    class quasi_harmonic(generic_covariance):
-        #
-        def __init__(self, frequency, length_scale):
-            self.function = lambda x,y,f=2*np.pi*frequency,s=length_scale: np.exp(-(x - y)**2/(2*s**2))*np.cos(f*(x - y))
-            self.fourier = lambda xi,f=2*np.pi*frequency,s=length_scale: 0.5*(s*np.exp(-s**2*(2*np.pi*xi-f)**2/(2)) 
-                                                                              + s*np.exp(-s**2*(2*np.pi*xi+f)**2/(2)))
-
-    class harmonic(generic_covariance):
-        #
-        def __init__(self, frequency):
-            self.function = lambda x,y,f=2*np.pi*frequency: np.cos(f*(x - y))
-            self.fourier = lambda xi: fourier_exception()
-
-    class polynomial(generic_covariance):
-        #
-        def __init__(self, order):
-            self.function = lambda x,y,p = order: (x*y + 1)**p
-            self.fourier = lambda xi: fourier_exception()
-
-    class periodic(generic_covariance):
-        #
-        def __init__(self, frequency, harmonicity):
-            self.function = lambda x,y,f = frequency, rho = harmonicity: np.exp(-2*np.sin(np.pi*f*(x - y))**2/rho**2) 
-            self.fourier = lambda xi: fourier_exception()
-
-#
 
 class linear_tools(object):
     #
@@ -87,7 +42,6 @@ class linear_tools(object):
 
 
 # 
-
 class functional_tools(object):
     #
     def __init__(self):
@@ -203,9 +157,83 @@ class functional_tools(object):
         diagonal_function = lambda x: bivariate_function(x,x)
         return diagonal_function
 
+class covariance_functions(object):
+    #
+    fun_tools = functional_tools()
+    
+    class generic_covariance(object):
+        #
+        def __init__(self):
+            self.function = lambda x,y: 0
+            self.fourier = lambda xi: self.__raise_fourier_error()
+        #
+        def __add__(self, second_covariance):
+            sum_covariance = self
+            sum_covariance.function = covariance_functions.fun_tools.bivariate_sum(self.function, 
+                                                                                   second_covariance.function)
+            sum_covariance.fourier = covariance_functions.fun_tools.sum(self.fourier, 
+                                                                        second_covariance.fourier)
+            return sum_covariance
+        #
+        def __mul__(self, covariance_or_scalar):
+            product_covariance = copy.copy(self)
+            if (type(covariance_or_scalar) != float)&(type(covariance_or_scalar) != int):
+                product_covariance.function = covariance_functions.fun_tools.bivariate_product(self.function, 
+                                                                                               covariance_or_scalar.function)
+                product_covariance.fourier = lambda xi: self.__raise_fourier_error()
+            else:
+                product_covariance.function = covariance_functions.fun_tools.bivariate_scale(self.function, 
+                                                                                             float(covariance_or_scalar))
+            return product_covariance
+        #
+        def __rmul__(self, covariance_or_scalar):
+            return self.__mul__(covariance_or_scalar)
+        #
+        def transformation(self, mapping):
+            transformed_covariance = copy.copy(self)
+            transformed_covariance.function = lambda x,y: self.function(mapping(x),mapping(y))
+            transformed_covariance.fourier = lambda xi: self.__raise_fourier_error()
+            return transformed_covariance
+        #
+        def __raise_fourier_error(self):
+            raise(NotImplementedError)
+        #
+        def __call__(self, x, y):
+            return self.function(x, y)
+    
+    class squared_exponential(generic_covariance):
+        #
+        def __init__(self, length_scale):
+            super(covariance_functions.squared_exponential, self).__init__()
+            self.function = lambda x,y,s=length_scale: np.exp(-(x - y)**2/(2*s**2))
+            self.fourier = lambda x,y,s=length_scale: s*np.exp(-s**2*(x - y)**2/(2))
 
+    class quasi_harmonic(generic_covariance):
+        #
+        def __init__(self, frequency, length_scale):
+            super(covariance_functions.quasi_harmonic, self).__init__()
+            self.function = lambda x,y,f=2*np.pi*frequency,s=length_scale: np.exp(-(x - y)**2/(2*s**2))*np.cos(f*(x - y))
+            self.fourier = lambda xi,f=2*np.pi*frequency,s=length_scale: 0.5*(s*np.exp(-s**2*(2*np.pi*xi-f)**2/(2)) 
+                                                                              + s*np.exp(-s**2*(2*np.pi*xi+f)**2/(2)))
+
+    class harmonic(generic_covariance):
+        #
+        def __init__(self, frequency):
+            self.function = lambda x,y,f=2*np.pi*frequency: np.cos(f*(x - y))
+
+    class polynomial(generic_covariance):
+        #
+        def __init__(self, order):
+            super(covariance_functions.polynomial, self).__init__()
+            self.function = lambda x,y,p = order: (x*y + 1)**p
+
+    class periodic(generic_covariance):
+        #
+        def __init__(self, frequency, harmonicity):
+            super(covariance_functions.periodic, self).__init__()
+            self.function = lambda x,y,f = frequency, rho = harmonicity: np.exp(-2*np.sin(np.pi*f*(x - y))**2/rho**2) 
 #
-
+#
 class kernel_tools(object):
     #
     def __init__(self):
