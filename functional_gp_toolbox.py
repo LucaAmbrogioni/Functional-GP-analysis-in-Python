@@ -42,6 +42,7 @@ class linear_tools(object):
 
 
 # 
+
 class functional_tools(object):
     #
     def __init__(self):
@@ -79,8 +80,13 @@ class functional_tools(object):
         differenced_function = lambda x,y: first_function(x,y) - second_function(x,y)
         return differenced_function 
     #
+    def bivariate_product(self, first_function, second_function):
+        product_function = lambda x,y: first_function(x,y)*second_function(x,y)
+        return product_function
+    #
     def bivariate_composition(self, bivariate_function, univariate_function):
         composed_function = lambda x,y: univariate_function(bivariate_function(x,y))
+        return composed_function
     #
     def outer_product(self, first_function, second_function):
         multiplied_function = lambda x,y: first_function(x)*second_function(y)
@@ -156,6 +162,9 @@ class functional_tools(object):
     def diagonal(self, bivariate_function):
         diagonal_function = lambda x: bivariate_function(x,x)
         return diagonal_function
+    #
+    def real(self, function):
+        return lambda x: np.real(function(x))
 
 class covariance_functions(object):
     #
@@ -206,7 +215,7 @@ class covariance_functions(object):
         def __init__(self, length_scale):
             super(covariance_functions.squared_exponential, self).__init__()
             self.function = lambda x,y,s=length_scale: np.exp(-(x - y)**2/(2*s**2))
-            self.fourier = lambda x,y,s=length_scale: s*np.exp(-s**2*(x - y)**2/(2))
+            self.fourier = lambda xi,s=length_scale: s*np.exp(-s**2*xi**2/(2))
 
     class quasi_harmonic(generic_covariance):
         #
@@ -219,6 +228,7 @@ class covariance_functions(object):
     class harmonic(generic_covariance):
         #
         def __init__(self, frequency):
+            super(covariance_functions.harmonic, self).__init__()
             self.function = lambda x,y,f=2*np.pi*frequency: np.cos(f*(x - y))
 
     class polynomial(generic_covariance):
@@ -232,8 +242,7 @@ class covariance_functions(object):
         def __init__(self, frequency, harmonicity):
             super(covariance_functions.periodic, self).__init__()
             self.function = lambda x,y,f = frequency, rho = harmonicity: np.exp(-2*np.sin(np.pi*f*(x - y))**2/rho**2) 
-#
-#
+
 class kernel_tools(object):
     #
     def __init__(self):
@@ -339,23 +348,21 @@ class kernel_tools(object):
         plt.legend(loc="best")
         plt.xlim(min(function_range),max(function_range))
         return
-
 #
-
 class spectral_tools(object):
     #
     def __init__(self):
         self.description = "This class contains method for working with Fourier transforms"
         self.fun_tools = functional_tools()
+        self.k_tools   = kernel_tools()
+        self.covariance_functions = covariance_functions()
         self.fourier_component = lambda f,t0: np.exp(1j*2*np.pi*f*t0)
     #
     def get_fourier_kernels_list(self,
                                  kernel,
                                  center_points):
-        if len(center_points) == 1:
-            transformed_signal = [self.fun_tools.product(kernel.fourier, 
-                                                         self.fun_tools.partial_application(self.fourier_component, 
-                                                                                            center_points[0]))]
+        if len(center_points) == 0:
+            transformed_signal = []
         else:
             transformed_signal = (self.get_fourier_kernels_list(kernel,
                                                                 center_points[:-1]) +
@@ -373,7 +380,85 @@ class spectral_tools(object):
         fourier_transform = self.fun_tools.linear_combination(fourier_kernels_list, 
                                                               weights_list)
         return fourier_transform  
-
+    #
+    def get_DFT_spectrum(self, data_points):
+        ts_length = len(data_points)
+        tapered_time_series = np.multiply(np.hanning(ts_length),data_points)
+        fourier = np.fft.fft(tapered_time_series, norm = "ortho")
+        DFT_spectrum = np.fft.fftshift(np.abs(fourier))**2
+        return DFT_spectrum
+    #
+    def get_frequency_range(self, time):
+        time_step = np.median(np.diff(time))
+        freq_range = np.fft.fftshift(np.fft.fftfreq(len(time))/time_step)
+        return freq_range
+    #
+    
+    #
+    def get_BFG_covariance_function(self,
+                                    time, 
+                                    data_points, 
+                                    noise_sd,
+                                    spectral_width = 2*np.pi*0.025):
+        ## private functions ##
+        def get_spectral_weights(data_points,
+                                 number_iterations = 15000,
+                                 learning_rate = 2.5*10**-2):
+            ## private functions ##
+            def spectral_gradient_ascent(initial_spectral_weights,
+                                         number_iterations, 
+                                         learning_rate):
+                ## private functions ##
+                def update_iterator(current_log_weights, n):
+                    if n == 0:
+                        return current_log_weights
+                    else:
+                        log_gradient = get_spectrum_functional_gradient(current_log_weights)
+                        new_log_weights = current_log_weights + learning_rate*log_gradient
+                        return update_iterator(new_log_weights, n - 1)
+                def get_spectrum_functional_gradient(current_log_weights):
+                    prediction = spectrum_covariance_matrix*np.exp(current_log_weights) 
+                    noise_contribution = np.ones(prediction.shape)*noise_sd**2
+                    deviation_function = lambda predicted,observed: np.divide(observed - predicted, 
+                                                                              np.power(predicted,2))
+                    gradient = (0.5*spectrum_covariance_matrix*deviation_function(prediction + noise_contribution, 
+                                                                                  data) # likelihood
+                                - prediction) # prior 
+                    log_gradient = np.multiply(np.exp(current_log_weights), gradient)
+                    return log_gradient  
+                ## main code ##
+                data = np.matrix(np.reshape(DFT_spectrum, newshape = (DFT_spectrum.shape[1],1)))
+                initial_log_weights = np.log(initial_spectral_weights)
+                log_weights = update_iterator(initial_log_weights, n = number_iterations)
+                spectral_weights = np.exp(log_weights)
+                return list(np.array(spectral_weights).flatten())
+            ## main code ##
+            DFT_spectrum = self.get_DFT_spectrum(data_points)
+            data_scale = np.mean(DFT_spectrum)
+            spectrum_covariance_matrix = np.matrix(self.k_tools.get_kernel_array(spectral_covariance_function, 
+                                                                                 x_range = frequency_range, 
+                                                                                 y_range = frequency_range))
+            nnls_results = optimize.nnls(A = spectrum_covariance_matrix, 
+                                         b = np.array(DFT_spectrum).flatten())
+            initial_spectral_weights = 0.1*np.reshape(nnls_results[0], newshape = (len(nnls_results[0]),1))
+            spectral_weights = spectral_gradient_ascent(initial_spectral_weights,
+                                                        number_iterations, 
+                                                        learning_rate)
+            return spectral_weights
+        ## main code ##
+        frequency_range = self.get_frequency_range(time)
+        spectral_covariance_function =  self.covariance_functions.squared_exponential(length_scale = spectral_width)
+        spectral_weights = get_spectral_weights(data_points)
+        BFG_covariance = self.covariance_functions.generic_covariance()
+        BFG_covariance.fourier = self.fun_tools.translated_linear_combination(bivariate_function = spectral_covariance_function, 
+                                                                              weights_list = spectral_weights, 
+                                                                              center_points = frequency_range)
+        stationary_covariance = self.fun_tools.real(self.get_fourier_transform(kernel = spectral_covariance_function,
+                                                           weights_list = spectral_weights,
+                                                           center_points = frequency_range))
+        BFG_covariance.function = self.fun_tools.bivariate_composition(lambda t1,t2: np.abs(t2 - t1), 
+                                                                       stationary_covariance)
+        return BFG_covariance
 # 
 
 class GP_regression_tools(object):
