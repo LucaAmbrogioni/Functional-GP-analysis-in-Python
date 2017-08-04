@@ -5,7 +5,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 import scipy as sp
 import random as rnd
-import copy
 import sys
 sys.setrecursionlimit(1000)
 get_ipython().magic(u'matplotlib inline')
